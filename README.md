@@ -124,7 +124,9 @@ Files patched (all under `/usr/share/omarchy/shell/plugins/lock/`):
 - `Service.qml` — a `faceProbeProc` / `facePollTimer` pair that calls the
   daemon, plus `faceState` (`idle`/`scanning`/`recognized`). Started from
   `onSecureStateChanged`, the same place the fingerprint flow starts, which is
-  why it also works after a lid-close resume.
+  why it also works after a lid-close resume. The timer interval is switched
+  between `facePollIntervalMs` (900 ms, someone is present) and
+  `faceIdleRecheckMs` (4 s, nobody around).
 - `LockView.qml` — the Face ID scanner drawn above the password field.
 
 - **Unlock by face** — polls the daemon via `bin/irface-lockauth`; measured
@@ -132,8 +134,35 @@ Files patched (all under `/usr/share/omarchy/shell/plugins/lock/`):
   green check on match.
 - **Fallback** — the stock password field is untouched and always works.
 - **Camera safety** — the daemon opens `/dev/video2` only for the duration of
-  a probe and closes it after. Three consecutive misses stop the poller, and
-  an unreachable daemon disables the feature rather than retrying forever.
+  a probe and closes it after. An unreachable daemon disables the feature
+  rather than retrying forever, and three consecutive *rejected faces* stop the
+  poller so a persistent mismatch does not keep waking the illuminator.
+
+### Probe exit codes
+`bin/irface-lockauth` distinguishes why a probe failed, which matters because
+the two cases deserve very different treatment:
+
+| Exit | Meaning | Lock screen reaction |
+| --- | --- | --- |
+| 0 | face matched | unlock |
+| 1 | a face was present but did not match | counts toward `faceMaxFailures` |
+| 2 | daemon unreachable | disables the feature |
+| 3 | **no face in frame at all** | does *not* count; re-arms in 4 s |
+
+The distinction exists because of a real bug. The poller used to treat every
+non-zero exit as a failure, so locking the machine and walking away burned all
+three attempts on an empty room. The poller then stopped for the remainder of
+the lock session, so returning to the machine did nothing and the owner had to
+type a password with their face right in front of the camera.
+
+An empty room is not a rejected attempt, so it must not spend the budget. A
+`noface` result re-arms on a slower 4 s cadence instead, and the fast 900 ms
+interval resumes as soon as a face is actually detected. Practical effect:
+**walking away is free, and coming back unlocks** — no mouse movement required,
+which matters because "walk up and look at the camera" is the intended gesture.
+
+Only genuine rejections (exit 1) still accumulate, so an impostor holding a
+photo in front of the sensor still runs the poller out after three tries.
 
 `omarchy update` overwrites these files, which silently removes face unlock.
 Restore it with:

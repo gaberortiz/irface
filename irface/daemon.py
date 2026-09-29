@@ -70,10 +70,12 @@ class FaceDaemon:
             return False, 0.0, "notemplate"
         with self.auth_lock:
             cap = self._ensure_cap()
-            ok, sim = auth.authenticate(cap, tpl, self.threshold,
-                                        self.timeout, self.det, self.rec)
+            ok, sim, reason = auth.authenticate(cap, tpl, self.threshold,
+                                                 self.timeout, self.det, self.rec)
             self._last_use = time.time()
-        return ok, sim, ("ok" if ok else "nomatch")
+        if ok:
+            reason = "ok"
+        return ok, sim, reason
 
     def _recv_line(self, conn):
         conn.settimeout(self.timeout + 5)

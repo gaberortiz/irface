@@ -41,8 +41,11 @@ def main(argv=None):
 
     if data.startswith("OK"):
         return 0
+    if "noface" in data:
+        print(data or "no-face", file=sys.stderr)
+        return 3  # no face seen at all; don't count as a failure
     print(data or "no-match", file=sys.stderr)
-    return 1
+    return 1  # face seen but did not match
 
 
 if __name__ == "__main__":

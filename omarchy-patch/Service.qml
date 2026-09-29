@@ -47,6 +47,18 @@ Item {
   property string faceStatus: ""
   readonly property int facePollIntervalMs: 900
   readonly property int faceMaxFailures: 3
+  // Exit 3 from the probe means the camera saw no face at all, as opposed to
+  // exit 1 (a face was present but did not match). An empty room must not
+  // spend the failure budget, or locking the machine and walking away would
+  // burn all three attempts and leave face unlock dead for the whole session.
+  readonly property int faceExitNoFace: 3
+  // Once a face actually is present but rejected this many times in a row,
+  // stop probing. A real face at the camera that keeps failing is either a
+  // genuine impostor or the owner without their glasses; either way, hammering
+  // the IR illuminator gains nothing.
+  // A noface result, by contrast, just re-arms the poll so returning to the
+  // machine is enough to trigger recognition.
+  readonly property int faceIdleRecheckMs: 4000
 
   readonly property bool locked: lockRequested || sessionLock.locked || sessionLock.secure
   readonly property bool authenticating: authenticatingPassword || fingerprintAuthenticating || faceAuthenticating
@@ -255,6 +267,8 @@ Item {
     faceAuthenticating = true
     faceState = "scanning"
     faceStatus = ""
+    // Reset to the fast interval: a person is at the machine right now.
+    facePollTimer.interval = root.facePollIntervalMs
     faceProbeProc.running = true
   }
 
@@ -272,6 +286,7 @@ Item {
     // 0 = recognized. Unlock exactly the way a fingerprint match does.
     if (exitCode === 0) {
       facePollFailures = 0
+      facePollTimer.interval = root.facePollIntervalMs
       faceState = "recognized"
       faceStatus = "Welcome back"
       logEvent("face-unlocked")
@@ -287,17 +302,32 @@ Item {
       return
     }
 
-    // A miss. Back off after a few in a row so a face that is never present
-    // does not keep waking the camera.
+    // 3 = no face in frame. This is an empty room, not a rejected attempt, so
+    // it must NOT count against the budget. Re-arm on a slower cadence so
+    // walking away does not wear out the camera, and returning re-triggers
+    // recognition without needing a mouse movement.
+    if (exitCode === root.faceExitNoFace) {
+      logEvent("face-noface: re-arm in " + root.faceIdleRecheckMs + "ms")
+      faceState = "idle"
+      faceStatus = ""
+      facePollTimer.interval = root.faceIdleRecheckMs
+      facePollTimer.restart()
+      return
+    }
+
+    // A face was present and rejected. Count it, and after a few in a row stop
+    // so a persistent mismatch does not keep waking the camera.
     logEvent("face-miss code=" + exitCode)
     faceState = "idle"
     faceStatus = ""
     facePollFailures += 1
     if (facePollFailures >= faceMaxFailures) {
       facePollFailures = 0
-      facePollTimer.stop()
+      facePollTimer.interval = root.faceIdleRecheckMs
+      facePollTimer.restart()
       return
     }
+    facePollTimer.interval = root.facePollIntervalMs
     facePollTimer.restart()
   }
 
