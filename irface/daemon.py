@@ -6,8 +6,10 @@ Run as root (needs camera access + serves all users):
 """
 import argparse
 import os
+import pwd
 import signal
 import socket
+import struct
 import sys
 import threading
 import time
@@ -25,6 +27,40 @@ def _ensure_sock_dir(path):
     d = os.path.dirname(path)
     if d and not os.path.isdir(d):
         os.makedirs(d, exist_ok=True)
+
+
+def _uid_of(user):
+    try:
+        return pwd.getpwnam(user).pw_uid
+    except KeyError:
+        return None
+
+
+def _peer_allowed(conn, user):
+    """Check the connecting process really is `user` (or root).
+
+    The socket is world-writable on purpose so any local user can trigger their
+    own auth. Without this check that also lets any local user ask about
+    *someone else's* template: a single request returns a similarity score,
+    which both confirms whether a user is enrolled and acts as an oracle for
+    measuring an attacker's own face against a victim's template.
+
+    Returns (allowed: bool, reason: str).
+    """
+    try:
+        raw = conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED,
+                              struct.calcsize("3i"))
+    except (OSError, AttributeError):
+        # No SO_PEERCRED (non-Linux): fall back to trusting the request rather
+        # than breaking auth outright. Documented as weaker in the README.
+        return True, "nopee"
+    _pid, uid, _gid = struct.unpack("3i", raw)
+    if uid == 0:
+        return True, "root"
+    want = _uid_of(user)
+    if want is not None and uid == want:
+        return True, "self"
+    return False, "notuser"
 
 
 IDLE_CLOSE_SEC = 8.0  # close the camera this long after the last auth request
@@ -95,6 +131,12 @@ class FaceDaemon:
                 conn.sendall(b"NO badrequest\n")
                 return
             user = parts[1]
+            allowed, why = _peer_allowed(conn, user)
+            if not allowed:
+                # Deliberately generic: do not confirm whether `user` exists
+                # or has a template to a caller with no right to ask.
+                conn.sendall(b"NO denied 0.0000\n")
+                return
             ok, sim, reason = self.authenticate(user)
             resp = f"{'OK' if ok else 'NO'} {reason} {sim:.4f}\n"
             conn.sendall(resp.encode())

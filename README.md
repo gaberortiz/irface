@@ -185,6 +185,8 @@ Pristine upstream copies are kept in `omarchy-patch/originals/`.
   across lid suspend/resume via its stranded-lock path.
 
 ## Security notes (important)
+See [SECURITY.md](SECURITY.md) for the trust boundaries and how to report a
+vulnerability privately. Key points:
 - **No liveness/anti-spoofing.** A printed photo or a phone screen showing your
   face will unlock the screen and authenticate `sudo`. A single 2D IR camera
   cannot do passive liveness — that needs depth or IR reflectance analysis.
@@ -193,8 +195,14 @@ Pristine upstream copies are kept in `omarchy-patch/originals/`.
   look at the screen. Not implemented; deliberately skipped.
 - The stock lock is hardened: it uses `ext-session-lock-v1` in secure state, so
   the session *is* hard-frozen and screenshots are blocked.
-- The daemon socket is `0666` and serves any username that has a template —
-  fine single-user; tighten if you go multi-user.
+- The daemon socket is `0666` so any local user can reach it and trigger their
+  own auth, but the daemon verifies the peer's uid with `SO_PEERCRED` and
+  refuses any request for a user other than the caller (root excepted). Without
+  that check the socket was an oracle: any local user could ask about someone
+  else's template and get back a live similarity score, which both confirmed
+  whether a user was enrolled and let an attacker measure their own face
+  against a victim's. The PAM path is independently safe — `pam_irface.c` takes
+  the username from `pam_get_user()`, never from the request.
 - The screen lock and `sudo` share the same anti-spoofing gap, so `sudo` is the
   weaker link in practice; keep `sudo` timeout short if you're worried.
 
