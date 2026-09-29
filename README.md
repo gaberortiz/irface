@@ -147,7 +147,7 @@ the two cases deserve very different treatment:
 | 0 | face matched | unlock |
 | 1 | a face was present but did not match | counts toward `faceMaxFailures` |
 | 2 | daemon unreachable | disables the feature |
-| 3 | **no face in frame at all** | does *not* count; re-arms in 4 s |
+| 3 | **no face in frame at all** | does *not* count; re-arms in 4 s, capped at 3 |
 
 The distinction exists because of a real bug. The poller used to treat every
 non-zero exit as a failure, so locking the machine and walking away burned all
@@ -163,6 +163,28 @@ which matters because "walk up and look at the camera" is the intended gesture.
 
 Only genuine rejections (exit 1) still accumulate, so an impostor holding a
 photo in front of the sensor still runs the poller out after three tries.
+
+### Backing off so the machine can sleep
+
+The empty-room re-arm is **capped** at `faceMaxNoFace` (3). An unbounded
+re-arm was a second bug: the probe runs every few seconds forever, which keeps
+`faceAuthenticating` true often enough to hold the display awake, and a blanked
+display under the lock screen is what lets the machine drop to suspend. The
+symptom is the machine sleeping as soon as face unlock fails to find anyone.
+
+Capping it only helps if returning restarts it, so `resumeFaceOnWake()` is
+called from every signal that means a person is present again:
+
+- `onWakeRequested` — a mouse or keyboard wake request
+- the suspend/resume transition, via `Qt.callLater`
+- any wake while the lock screen is up
+
+This is the piece that makes walk-away work *and* lets the machine sleep: the
+loop stops so the box can idle, and the act of coming back re-arms it.
+
+A rejected face (exit 1) is different from an empty room — someone is standing
+there — so after `faceMaxFailures` it keeps trying, just slowly, at
+`faceRejectedRecheckMs` (1.5 s).
 
 `omarchy update` overwrites these files, which silently removes face unlock.
 Restore it with:

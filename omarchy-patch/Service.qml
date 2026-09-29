@@ -56,9 +56,20 @@ Item {
   // stop probing. A real face at the camera that keeps failing is either a
   // genuine impostor or the owner without their glasses; either way, hammering
   // the IR illuminator gains nothing.
-  // A noface result, by contrast, just re-arms the poll so returning to the
-  // machine is enough to trigger recognition.
+  //
+  // A noface result does not spend the budget, but it must not loop forever
+  // either: an unbounded re-arm keeps the panel lit and the machine out of
+  // suspend, which is worse than a missed unlock. So empty-room probes are
+  // capped at faceMaxNoFace and then stop. Coming back is still enough to
+  // restart, because the secure transition and any wake re-arm the poll.
+  readonly property int faceMaxNoFace: 3
+  // Empty-room cadence. Only ever three of these, so the backoff runs out
+  // quickly instead of holding the display awake indefinitely.
   readonly property int faceIdleRecheckMs: 4000
+  // A rejected face does get a few more tries, but at the slow cadence: the
+  // person is present, yet it is not going to match.
+  readonly property int faceRejectedRecheckMs: 1500
+  property int faceNoFaceCount: 0
 
   readonly property bool locked: lockRequested || sessionLock.locked || sessionLock.secure
   readonly property bool authenticating: authenticatingPassword || fingerprintAuthenticating || faceAuthenticating
@@ -200,6 +211,20 @@ Item {
     if (lockRequested) armBlankTimer()
   }
 
+  // Waking the machine means a person is present again. This is the hook that
+  // makes walk-away work: the empty-room loop is capped so the machine can
+  // sleep, and coming back re-arms the poll. Without this, capping the loop
+  // would mean a returned owner has to type their password.
+  function resumeFaceOnWake() {
+    if (!lockRequested || !faceConfigured) return
+    if (facePollTimer.running || faceProbeProc.running) return
+    logEvent("face-resume on wake")
+    faceNoFaceCount = 0
+    facePollFailures = 0
+    facePollTimer.interval = root.facePollIntervalMs
+    facePollTimer.restart()
+  }
+
   function runBlank() {
     if (!blankProcess.running) blankProcess.running = true
   }
@@ -286,6 +311,7 @@ Item {
     // 0 = recognized. Unlock exactly the way a fingerprint match does.
     if (exitCode === 0) {
       facePollFailures = 0
+      faceNoFaceCount = 0
       facePollTimer.interval = root.facePollIntervalMs
       faceState = "recognized"
       faceStatus = "Welcome back"
@@ -303,11 +329,21 @@ Item {
     }
 
     // 3 = no face in frame. This is an empty room, not a rejected attempt, so
-    // it must NOT count against the budget. Re-arm on a slower cadence so
-    // walking away does not wear out the camera, and returning re-triggers
-    // recognition without needing a mouse movement.
+    // it must NOT count against the failure budget. It is still capped, though:
+    // an unbounded re-arm would keep the panel lit and the machine awake, which
+    // is a worse failure than a missed unlock. Returning re-arms the poll.
     if (exitCode === root.faceExitNoFace) {
-      logEvent("face-noface: re-arm in " + root.faceIdleRecheckMs + "ms")
+      faceNoFaceCount += 1
+      if (faceNoFaceCount >= root.faceMaxNoFace) {
+        logEvent("face-noface x" + faceNoFaceCount + ": stopping, awaiting return")
+        faceState = "idle"
+        faceStatus = ""
+        faceNoFaceCount = 0
+        facePollTimer.stop()
+        return
+      }
+      logEvent("face-noface " + faceNoFaceCount + "/" + root.faceMaxNoFace
+               + ": re-arm in " + root.faceIdleRecheckMs + "ms")
       faceState = "idle"
       faceStatus = ""
       facePollTimer.interval = root.faceIdleRecheckMs
@@ -323,7 +359,10 @@ Item {
     facePollFailures += 1
     if (facePollFailures >= faceMaxFailures) {
       facePollFailures = 0
-      facePollTimer.interval = root.faceIdleRecheckMs
+      faceNoFaceCount = 0
+      logEvent("face-miss x" + root.faceMaxFailures + ": slowing to "
+               + root.faceRejectedRecheckMs + "ms")
+      facePollTimer.interval = root.faceRejectedRecheckMs
       facePollTimer.restart()
       return
     }
@@ -365,6 +404,9 @@ Item {
         pendingSessionLockTimer.stop()
         root.resetAuthenticationState()
         root.runWake()
+        // Coming back from suspend is exactly the walk-away-then-return case:
+        // the empty-room loop stopped so the machine could sleep, so restart it.
+        Qt.callLater(function() { root.resumeFaceOnWake() })
       }
     }
 
@@ -392,7 +434,10 @@ Item {
         onPasswordTextEdited: function(password) { root.enteredPassword = password }
         onSubmitPassword: function(password) { root.submitPassword(password) }
         onClearFailureRequested: root.failureMessage = ""
-        onWakeRequested: root.runWake()
+        onWakeRequested: {
+          root.runWake()
+          root.resumeFaceOnWake()
+        }
       }
 
     }
