@@ -231,10 +231,11 @@ Item {
     faceArmed = false
   }
 
-  // The click. Arms the poller for a fresh run and starts it immediately.
+  // The click, and also the automatic arm on a deliberate lock or lid-open.
+  // Arms the poller for a fresh run and starts it immediately.
   function armFace() {
     if (!lockRequested || !faceConfigured) return
-    logEvent("face-armed by user")
+    logEvent("face-armed")
     faceArmed = true
     faceNoFaceCount = 0
     facePollFailures = 0
@@ -402,12 +403,15 @@ Item {
         sessionLockStabilizeTimer.stop()
         pendingSessionLockTimer.stop()
         root.startFingerprint()
-        // Face unlock offers itself from the same secure transition, which is
-        // what makes it available after a lid-close resume as well as a manual
-        // lock. Arming the camera is a separate, explicit click: `faceArmed`
-        // stays false here so nothing is scanned until the owner asks.
-        root.faceNoFaceCount = 0
-        root.facePollFailures = 0
+        // Reaching secure state means somebody deliberately locked the machine
+        // (Super+CTRL+L) or opened the lid and let it resume. Both are
+        // unambiguous owner actions, so the camera arms immediately here and
+        // the "walk up and look" gesture keeps working with no click.
+        //
+        // Qt.callLater so this runs after the suspend/resume handlers: this
+        // transition is the authoritative one, and must not be undone by a
+        // resume path that thinks nobody is there.
+        Qt.callLater(function() { root.armFace() })
       }
     }
 
