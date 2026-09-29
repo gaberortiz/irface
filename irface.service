@@ -1,0 +1,17 @@
+[Unit]
+Description=irface IR face-auth daemon
+Documentation=file://@IRFACE_DIR@/README.md
+
+[Service]
+Type=simple
+WorkingDirectory=@IRFACE_DIR@
+Environment=PYTHONPATH=@IRFACE_DIR@
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/usr/bin/python3 -m irface.daemon
+Restart=on-failure
+RestartSec=2
+# The daemon opens the IR camera and listens on a world-writable socket so any
+# local user can trigger an auth; it hard-restarts on failure.
+
+[Install]
+WantedBy=multi-user.target

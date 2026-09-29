@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# One-shot face auth for the Omarchy lock screen (QML calls this).
+# Exit 0 = recognized, 1 = no match, 2 = unavailable.
+# Hard timeout guarantees the camera is never held by a stuck caller.
+set -uo pipefail
+root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+export PYTHONPATH="$root${PYTHONPATH:+:$PYTHONPATH}"
+exec timeout --kill-after=2s 10s /usr/bin/python3 -m irface.lockauth

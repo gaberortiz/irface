@@ -1,0 +1,12 @@
+# Model weights are fetched by ./install.sh --download-models, not committed.
+# YuNet + SFace are ~38 MB; keeping them out of git history keeps clones small.
+models/*.onnx
+
+# Build output
+__pycache__/
+*.py[cod]
+*.so
+pam/pam_passcheck
+
+# Staged copies / backups created by the installer and PAM patcher
+*.irface.bak

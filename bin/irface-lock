@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# irface lock screen — fullscreen face-unlock lock (password fallback).
+# gtk4-layer-shell must be loaded before libwayland-client or layer-surface
+# init fails silently; LD_PRELOAD the real library to guarantee ordering.
+export LD_PRELOAD=/usr/lib/libgtk4-layer-shell.so${LD_PRELOAD:+:$LD_PRELOAD}
+# Resolve the project root from this script's own location so the launcher
+# works regardless of cwd (Hyprland exec / omarchy start us in $HOME).
+root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+export PYTHONPATH="$root${PYTHONPATH:+:$PYTHONPATH}"
+exec /usr/bin/python3 -m irface.lock_gui "$@"

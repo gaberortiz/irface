@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# irface CLI launcher — uses system python (where Arch installs OpenCV bindings).
+set -euo pipefail
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+exec /usr/bin/python3 -m "irface.$1" "${@:2}"
