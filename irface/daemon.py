@@ -79,11 +79,25 @@ class FaceDaemon:
         # powered ONLY while an auth is actually being attempted.
         self._cap = None
         self._last_use = 0.0
-        self.det = models.detector()
-        self.rec = models.recognizer()
+        # Models load on first use rather than at startup. Measured: OpenCV's
+        # DNN cache never returns the memory, so once loaded it is held for the
+        # life of the process -- which means a daemon that never authenticates
+        # never pays for it at all. The SFace session alone is ~59MB resident
+        # on a ~112MB OpenCV baseline, and the daemon is idle nearly always.
+        # The first probe after a cold start pays a ~1s load.
+        self.det = None
+        self.rec = None
         self.auth_lock = threading.Lock()  # camera is single-use; serialize
         self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self._stop = threading.Event()
+
+    def _ensure_models(self):
+        """Load the ONNX sessions on demand. Caller must hold auth_lock."""
+        if self.det is None:
+            self.det = models.detector()
+        if self.rec is None:
+            self.rec = models.recognizer()
+        return self.det, self.rec
 
     def _ensure_cap(self):
         if self._cap is None:
@@ -92,7 +106,14 @@ class FaceDaemon:
         return self._cap
 
     def _janitor(self):
-        """Close the camera once it's been idle for idle_close seconds."""
+        """Close the camera once it's been idle for idle_close seconds.
+
+        Models are deliberately NOT released here. OpenCV's DNN module caches
+        each net for the life of the process and will not hand the memory back:
+        measured, dropping the handles and forcing gc left RSS unchanged at
+        176MB. So releasing them would only add a ~1s reload to the next probe
+        for no benefit. Lazy loading at startup is what actually saves memory.
+        """
         while not self._stop.wait(1.0):
             with self.auth_lock:
                 if (self._cap is not None
@@ -106,8 +127,9 @@ class FaceDaemon:
             return False, 0.0, "notemplate"
         with self.auth_lock:
             cap = self._ensure_cap()
+            det, rec = self._ensure_models()
             ok, sim, reason = auth.authenticate(cap, tpl, self.threshold,
-                                                 self.timeout, self.det, self.rec)
+                                                 self.timeout, det, rec)
             self._last_use = time.time()
         if ok:
             reason = "ok"

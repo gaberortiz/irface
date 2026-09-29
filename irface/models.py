@@ -1,6 +1,15 @@
 import os
 import cv2
 
+# The daemon is idle almost all the time and a probe is a single 640x360 frame,
+# so OpenCV's default pool of one thread per core is pure overhead. Capping it
+# keeps the resident set and thread count down without measurably slowing a
+# probe. Tunable via the environment for anyone on very different hardware.
+try:
+    cv2.setNumThreads(int(os.environ.get("IRFACE_THREADS", "2")))
+except Exception:
+    pass
+
 _PKG_DIR = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.dirname(_PKG_DIR)
 MODELS_DIR = os.environ.get("IRFACE_MODELS_DIR", os.path.join(_ROOT, "models"))

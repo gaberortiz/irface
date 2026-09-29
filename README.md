@@ -140,6 +140,32 @@ Files patched (all under `/usr/share/omarchy/shell/plugins/lock/`):
   rather than retrying forever, and three consecutive *rejected faces* stop the
   poller so a persistent mismatch does not keep waking the illuminator.
 
+### Memory
+
+The daemon is idle almost all the time, so it should not sit on ~350MB of
+model weights. Measured on this machine (20 cores, OpenCV 5.0):
+
+| | Resident |
+| --- | --- |
+| daemon, idle, before | 354 MB |
+| daemon, idle, after | **116 MB** |
+| after first auth (models now loaded) | 199 MB |
+
+- **Models load on first use**, not at startup. OpenCV's DNN module caches each
+  net for the life of the process and never returns the memory — measured:
+  dropping the handles and forcing `gc` left RSS unchanged at 176MB. So a
+  daemon that never authenticates never pays for the weights, and releasing
+  them at idle would only add a ~1s reload to the next probe for no benefit.
+  The janitor therefore closes the camera but deliberately leaves the models.
+- **Thread pool is capped** via `IRFACE_THREADS` (default 2). This does *not*
+  reduce resident memory — 175MB at 1 thread and at 20 — but it avoids one
+  OpenCV worker per core on a box that is mostly idle. Raise it on very
+  different hardware.
+- The ~112MB floor is `import cv2` itself and is unavoidable.
+
+First auth after a cold start pays roughly 1s of model loading; warm probes are
+unaffected.
+
 ### Probe exit codes
 `bin/irface-lockauth` distinguishes why a probe failed, which matters because
 the two cases deserve very different treatment:
