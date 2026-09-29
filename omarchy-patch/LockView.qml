@@ -137,7 +137,9 @@ Item {
     // is not available, so the stock lock looks untouched.
     Item {
       id: faceScanner
-      visible: root.faceConfigured
+      // Also visible while disarmed so the "Use face unlock" button has a home;
+      // the glyph inside is dimmed to show nothing is being scanned.
+      visible: root.faceConfigured || !root.faceArmed
       width: 96
       height: 96
       anchors.horizontalCenter: inputField.horizontalCenter
@@ -228,8 +230,10 @@ Item {
       // the camera again.
       Rectangle {
         id: faceArmButton
-        visible: root.faceConfigured && !root.faceArmed
-                 && !root.authenticatingPassword
+        // Gated on being disarmed, not on faceConfigured: the config probe is
+        // asynchronous, so for a moment after a lock both are false and the
+        // button would be invisible exactly when the owner needs it.
+        visible: !root.faceArmed && !root.authenticatingPassword
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.top: parent.bottom
         anchors.topMargin: 12

@@ -231,16 +231,26 @@ Item {
     faceArmed = false
   }
 
-  // The click, and also the automatic arm on a deliberate lock or lid-open.
-  // Arms the poller for a fresh run and starts it immediately.
-  function armFace() {
+  // Arm only once the daemon has actually been confirmed. `faceConfigured` is
+  // set asynchronously by faceCheckProc, so on a fresh lock it is still false
+  // at the moment of the secure transition; returning early there used to leave
+  // the poller permanently disarmed. The config callback calls this again, so
+  // whichever order they land in, the end state is armed.
+  function maybeArmFace() {
     if (!lockRequested || !faceConfigured) return
+    if (faceArmed) return
     logEvent("face-armed")
     faceArmed = true
     faceNoFaceCount = 0
     facePollFailures = 0
     facePollTimer.interval = root.facePollIntervalMs
     if (!facePollTimer.running && !faceProbeProc.running) facePollTimer.restart()
+  }
+
+  // The click, and the automatic arm on a deliberate lock or lid-open.
+  function armFace() {
+    faceArmed = false
+    maybeArmFace()
   }
 
   function runBlank() {
@@ -565,6 +575,10 @@ Item {
       onStreamFinished: {
         root.faceConfigured = String(text || "").trim() === "yes"
         root.logEvent("face-config=" + (root.faceConfigured ? "yes" : "no"))
+        // The daemon is only known-good from here on, so this is the earliest
+        // point at which arming can be trusted. Without it, a secure transition
+        // that raced ahead of this probe would disarm face unlock permanently.
+        if (root.faceConfigured && root.lockRequested) root.maybeArmFace()
       }
     }
   }
