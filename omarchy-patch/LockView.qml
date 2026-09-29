@@ -144,7 +144,9 @@ Item {
       height: 96
       anchors.horizontalCenter: inputField.horizontalCenter
       anchors.bottom: inputField.top
-      anchors.bottomMargin: 40
+      // Lifts to clear the re-arm button when the poller is disarmed; the
+      // button is anchored to the field, so without this the two overlap.
+      anchors.bottomMargin: root.faceArmed ? 40 : 82
 
       readonly property color accent: root.faceState === "recognized"
         ? "#3ddc84"
@@ -223,45 +225,48 @@ Item {
         font.family: Style.font.family
         font.pixelSize: Math.round(Style.font.heading * 0.62)
       }
+    }
 
-      // Re-arm affordance. Shown only once the poller has disarmed itself
-      // because the room stayed empty, which is also the state that lets the
-      // display blank and the machine suspend. Clicking this is what starts
-      // the camera again.
-      Rectangle {
-        id: faceArmButton
-        // Gated on being disarmed, not on faceConfigured: the config probe is
-        // asynchronous, so for a moment after a lock both are false and the
-        // button would be invisible exactly when the owner needs it.
-        visible: !root.faceArmed && !root.authenticatingPassword
-        anchors.horizontalCenter: parent.horizontalCenter
-        anchors.top: parent.bottom
-        anchors.topMargin: 12
-        width: armLabel.implicitWidth + 44
-        height: 34
-        radius: height / 2
-        color: "transparent"
-        border.width: 1
-        border.color: faceScanner.accent
-        opacity: 0.85
+    // Re-arm affordance, a sibling of the scanner rather than a child.
+    //
+    // It used to hang off the scanner's bottom edge, but the scanner is a fixed
+    // 96px box sitting 40px above the password field, so a 34px button hung
+    // there overlapped the field by 6px and was hidden behind it. Anchored to
+    // the field instead, and the scanner lifts to make room, so both are always
+    // fully visible and never overlap.
+    Rectangle {
+      id: faceArmButton
+      // Gated on being disarmed, not on faceConfigured: the config probe is
+      // asynchronous, so for a moment after a lock both are false and the
+      // button would be invisible exactly when the owner needs it.
+      visible: !root.faceArmed && !root.authenticatingPassword
+      anchors.horizontalCenter: inputField.horizontalCenter
+      anchors.bottom: inputField.top
+      anchors.bottomMargin: 12
+      width: armLabel.implicitWidth + 44
+      height: 34
+      radius: height / 2
+      color: "transparent"
+      border.width: 1
+      border.color: faceScanner.accent
+      opacity: 0.85
 
-        Text {
-          id: armLabel
-          anchors.centerIn: parent
-          text: "Use face unlock"
-          color: faceScanner.accent
-          font.family: Style.font.family
-          font.pixelSize: Math.round(Style.font.heading * 0.62)
-        }
+      Text {
+        id: armLabel
+        anchors.centerIn: parent
+        text: "Use face unlock"
+        color: faceScanner.accent
+        font.family: Style.font.family
+        font.pixelSize: Math.round(Style.font.heading * 0.62)
+      }
 
-        MouseArea {
-          anchors.fill: parent
-          hoverEnabled: true
-          cursorShape: Qt.PointingHandCursor
-          onEntered: faceArmButton.opacity = 1
-          onExited: faceArmButton.opacity = 0.85
-          onClicked: root.armFaceRequested()
-        }
+      MouseArea {
+        anchors.fill: parent
+        hoverEnabled: true
+        cursorShape: Qt.PointingHandCursor
+        onEntered: faceArmButton.opacity = 1
+        onExited: faceArmButton.opacity = 0.85
+        onClicked: root.armFaceRequested()
       }
     }
 
