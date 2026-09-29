@@ -45,6 +45,12 @@ Item {
   property int facePollFailures: 0
   property string faceState: "idle"
   property string faceStatus: ""
+  // Face polling only runs while armed. The poller disarms itself once the room
+  // has been empty long enough (faceMaxNoFace noface probes), so the machine can
+  // blank and suspend normally. Re-arming is a deliberate click on the lock
+  // screen: standing at the machine is not consent to be scanned, and an armed
+  // poller is precisely what kept the display awake.
+  property bool faceArmed: false
   readonly property int facePollIntervalMs: 900
   readonly property int faceMaxFailures: 3
   // Exit 3 from the probe means the camera saw no face at all, as opposed to
@@ -70,7 +76,6 @@ Item {
   // person is present, yet it is not going to match.
   readonly property int faceRejectedRecheckMs: 1500
   property int faceNoFaceCount: 0
-
   readonly property bool locked: lockRequested || sessionLock.locked || sessionLock.secure
   readonly property bool authenticating: authenticatingPassword || fingerprintAuthenticating || faceAuthenticating
 
@@ -211,18 +216,30 @@ Item {
     if (lockRequested) armBlankTimer()
   }
 
-  // Waking the machine means a person is present again. This is the hook that
-  // makes walk-away work: the empty-room loop is capped so the machine can
-  // sleep, and coming back re-arms the poll. Without this, capping the loop
-  // would mean a returned owner has to type their password.
-  function resumeFaceOnWake() {
+  // Waking the machine means a person is present again, so offer the lock
+  // screen the "use face unlock" affordance again. It does NOT start the camera
+  // on its own: the poller stays disarmed until the click, so the display is
+  // free to blank and the box to suspend while nobody is there.
+  function offerFaceOnWake() {
     if (!lockRequested || !faceConfigured) return
-    if (facePollTimer.running || faceProbeProc.running) return
-    logEvent("face-resume on wake")
+    faceNoFaceCount = 0
+    facePollFailures = 0
+    if (facePollTimer.running || faceProbeProc.running) {
+      faceArmed = true
+      return
+    }
+    faceArmed = false
+  }
+
+  // The click. Arms the poller for a fresh run and starts it immediately.
+  function armFace() {
+    if (!lockRequested || !faceConfigured) return
+    logEvent("face-armed by user")
+    faceArmed = true
     faceNoFaceCount = 0
     facePollFailures = 0
     facePollTimer.interval = root.facePollIntervalMs
-    facePollTimer.restart()
+    if (!facePollTimer.running && !faceProbeProc.running) facePollTimer.restart()
   }
 
   function runBlank() {
@@ -287,6 +304,7 @@ Item {
 
   function startFace() {
     if (!lockRequested || !sessionLock.secure || !faceConfigured) return
+    if (!faceArmed) return
     if (faceAuthenticating || faceProbeProc.running) return
 
     faceAuthenticating = true
@@ -301,6 +319,7 @@ Item {
     faceAuthenticating = false
     faceState = "idle"
     faceStatus = ""
+    faceArmed = false
     facePollTimer.stop()
   }
 
@@ -335,10 +354,11 @@ Item {
     if (exitCode === root.faceExitNoFace) {
       faceNoFaceCount += 1
       if (faceNoFaceCount >= root.faceMaxNoFace) {
-        logEvent("face-noface x" + faceNoFaceCount + ": stopping, awaiting return")
+        logEvent("face-noface x" + faceNoFaceCount + ": disarming, awaiting user")
         faceState = "idle"
         faceStatus = ""
         faceNoFaceCount = 0
+        faceArmed = false
         facePollTimer.stop()
         return
       }
@@ -382,9 +402,12 @@ Item {
         sessionLockStabilizeTimer.stop()
         pendingSessionLockTimer.stop()
         root.startFingerprint()
-        // Face unlock starts from the same secure transition, which is what
-        // makes it work after a lid-close resume as well as a manual lock.
-        Qt.callLater(function() { root.startFace() })
+        // Face unlock offers itself from the same secure transition, which is
+        // what makes it available after a lid-close resume as well as a manual
+        // lock. Arming the camera is a separate, explicit click: `faceArmed`
+        // stays false here so nothing is scanned until the owner asks.
+        root.faceNoFaceCount = 0
+        root.facePollFailures = 0
       }
     }
 
@@ -406,7 +429,7 @@ Item {
         root.runWake()
         // Coming back from suspend is exactly the walk-away-then-return case:
         // the empty-room loop stopped so the machine could sleep, so restart it.
-        Qt.callLater(function() { root.resumeFaceOnWake() })
+        Qt.callLater(function() { root.offerFaceOnWake() })
       }
     }
 
@@ -426,6 +449,8 @@ Item {
         faceAuthenticating: root.faceAuthenticating
         faceState: root.faceState
         faceStatus: root.faceStatus
+        faceArmed: root.faceArmed
+        onArmFaceRequested: root.armFace()
         failureMessage: root.failureMessage
         failedAttempts: root.failedAttempts
         inputEnabled: root.lockRequested
@@ -436,7 +461,7 @@ Item {
         onClearFailureRequested: root.failureMessage = ""
         onWakeRequested: {
           root.runWake()
-          root.resumeFaceOnWake()
+          root.offerFaceOnWake()
         }
       }
 

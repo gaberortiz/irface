@@ -15,6 +15,11 @@ Item {
   // "idle" | "scanning" | "recognized"
   property string faceState: "idle"
   property string faceStatus: ""
+  // False once the poller has given up on an empty room. The click target
+  // below is only offered while this is false, so the camera never runs
+  // without an explicit request.
+  property bool faceArmed: true
+  signal armFaceRequested()
   property bool authenticatingPassword: false
   property string failureMessage: ""
   property int failedAttempts: 0
@@ -186,15 +191,20 @@ Item {
         font.pixelSize: Math.round(faceScanner.width * 0.4)
         color: faceScanner.accent
         text: root.faceState === "recognized" ? "✓" : "󰓛"
-        opacity: root.faceState === "idle" ? 0.5 : 1
+        // Dimmed while disarmed: nothing is being scanned, and the button below
+        // is the way to start.
+        opacity: root.faceArmed ? (root.faceState === "idle" ? 0.5 : 1) : 0.25
 
         Behavior on color { ColorAnimation { duration: 180 } }
         Behavior on opacity { NumberAnimation { duration: 180 } }
 
-        // A short pop on match, then settle.
+        // A short pop on match, then settle. The id sits on the animation
+        // itself: calling restart() on the child NumberAnimation instead only
+        // warns ("non-root animation node") and does not actually run.
         SequentialAnimation on scale {
+          id: pop
           running: false
-          NumberAnimation { id: pop; from: 1; to: 1.18; duration: 140; easing.type: Easing.OutQuad }
+          NumberAnimation { from: 1; to: 1.18; duration: 140; easing.type: Easing.OutQuad }
           NumberAnimation { from: 1.18; to: 1; duration: 180; easing.type: Easing.InOutQuad }
         }
         onTextChanged: function() { if (text === "\u2713") pop.restart() }
@@ -210,6 +220,44 @@ Item {
         color: Color.lock.placeholder
         font.family: Style.font.family
         font.pixelSize: Math.round(Style.font.heading * 0.62)
+      }
+
+      // Re-arm affordance. Shown only once the poller has disarmed itself
+      // because the room stayed empty, which is also the state that lets the
+      // display blank and the machine suspend. Clicking this is what starts
+      // the camera again.
+      Rectangle {
+        id: faceArmButton
+        visible: root.faceConfigured && !root.faceArmed
+                 && !root.authenticatingPassword
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.top: parent.bottom
+        anchors.topMargin: 12
+        width: armLabel.implicitWidth + 44
+        height: 34
+        radius: height / 2
+        color: "transparent"
+        border.width: 1
+        border.color: faceScanner.accent
+        opacity: 0.85
+
+        Text {
+          id: armLabel
+          anchors.centerIn: parent
+          text: "Use face unlock"
+          color: faceScanner.accent
+          font.family: Style.font.family
+          font.pixelSize: Math.round(Style.font.heading * 0.62)
+        }
+
+        MouseArea {
+          anchors.fill: parent
+          hoverEnabled: true
+          cursorShape: Qt.PointingHandCursor
+          onEntered: faceArmButton.opacity = 1
+          onExited: faceArmButton.opacity = 0.85
+          onClicked: root.armFaceRequested()
+        }
       }
     }
 

@@ -127,7 +127,9 @@ Files patched (all under `/usr/share/omarchy/shell/plugins/lock/`):
   why it also works after a lid-close resume. The timer interval is switched
   between `facePollIntervalMs` (900 ms, someone is present) and
   `faceIdleRecheckMs` (4 s, nobody around).
-- `LockView.qml` — the Face ID scanner drawn above the password field.
+- `LockView.qml` — the Face ID scanner drawn above the password field, plus
+  the "Use face unlock" re-arm button that appears when the poller has
+  disarmed itself.
 
 - **Unlock by face** — polls the daemon via `bin/irface-lockauth`; measured
   round trip ~1.8 s. The scanner sweeps while a probe is in flight and shows a
@@ -164,27 +166,37 @@ which matters because "walk up and look at the camera" is the intended gesture.
 Only genuine rejections (exit 1) still accumulate, so an impostor holding a
 photo in front of the sensor still runs the poller out after three tries.
 
-### Backing off so the machine can sleep
+### Backing off, and why re-arming is a click
 
-The empty-room re-arm is **capped** at `faceMaxNoFace` (3). An unbounded
-re-arm was a second bug: the probe runs every few seconds forever, which keeps
-`faceAuthenticating` true often enough to hold the display awake, and a blanked
-display under the lock screen is what lets the machine drop to suspend. The
-symptom is the machine sleeping as soon as face unlock fails to find anyone.
+The empty-room re-arm is **capped** at `faceMaxNoFace` (3), after which the
+poller **disarms** entirely. An unbounded re-arm was a second bug: the probe
+runs every few seconds forever, which keeps the panel lit and the machine out of
+suspend — the symptom being that the machine sleeps as soon as face unlock fails
+to find anyone.
 
-Capping it only helps if returning restarts it, so `resumeFaceOnWake()` is
-called from every signal that means a person is present again:
+Disarming is deliberate rather than a pause, and re-arming is a **click on the
+lock screen**, not an automatic retry. Two reasons:
 
-- `onWakeRequested` — a mouse or keyboard wake request
-- the suspend/resume transition, via `Qt.callLater`
-- any wake while the lock screen is up
+- **It fixes the sleep properly.** A disarmed poller opens no camera and holds
+  no timer, so the display blanks and the machine suspends normally. A paused
+  poller would still wake the camera on a timer.
+- **Standing at the machine is not consent to be scanned.** Auto-retrying the
+  moment a wake is detected means the camera turns on the instant you walk up,
+  including when you have just sat down to type a password. A click makes the
+  camera start an explicit choice.
 
-This is the piece that makes walk-away work *and* lets the machine sleep: the
-loop stops so the box can idle, and the act of coming back re-arms it.
+So the flow is: lock, and the scanner scans normally for as long as someone is
+there. Walk away and after three empty probes it disarms and the machine may
+sleep. Come back and the lock screen offers a **"Use face unlock"** button
+(dimmed scanner glyph) — click it, and scanning resumes at the full 900 ms
+interval. Password entry works throughout and is never gated on the click.
+
+`faceArmed` is the single gate: `startFace()` returns immediately when it is
+false, so no code path can open the camera while disarmed.
 
 A rejected face (exit 1) is different from an empty room — someone is standing
-there — so after `faceMaxFailures` it keeps trying, just slowly, at
-`faceRejectedRecheckMs` (1.5 s).
+there — so it keeps scanning after `faceMaxFailures`, just slowly, at
+`faceRejectedRecheckMs` (1.5 s), while still armed.
 
 `omarchy update` overwrites these files, which silently removes face unlock.
 Restore it with:
