@@ -148,7 +148,7 @@ Files patched (all under `/usr/share/omarchy/shell/plugins/lock/`):
   between `facePollIntervalMs` (900 ms, someone is present) and
   `faceIdleRecheckMs` (4 s, nobody around).
 - `LockView.qml` — the Face ID scanner drawn above the password field, plus
-  the "Use face unlock" re-arm button that appears when the poller has
+  the "Press Space to use face unlock" hint that appears when the poller has
   disarmed itself.
 
 - **Unlock by face** — polls the daemon via `bin/irface-lockauth`; measured
@@ -212,30 +212,33 @@ which matters because "walk up and look at the camera" is the intended gesture.
 Only genuine rejections (exit 1) still accumulate, so an impostor holding a
 photo in front of the sensor still runs the poller out after three tries.
 
-### Backing off, and why re-arming is a click
+### Backing off, and why re-arming needs an explicit act
 
-The empty-room re-arm is **capped** at `faceMaxNoFace` (3), after which the
-poller **disarms** entirely. An unbounded re-arm was a second bug: the probe
-runs every few seconds forever, which keeps the panel lit and the machine out of
-suspend — the symptom being that the machine sleeps as soon as face unlock fails
-to find anyone.
+The empty-room path is **not capped at some larger number — it runs exactly one
+probe and then the poller disarms entirely.** An unbounded re-arm was a second
+bug: the probe runs every few seconds forever, which keeps the panel lit and
+the machine out of suspend — the symptom being that the machine sleeps as soon
+as face unlock fails to find anyone. The `faceMaxNoFace` cap and the
+`faceIdleRecheckMs` backoff that once implemented this are gone; with a cap of
+one, the re-arm branch was unreachable and keeping it would have been dead
+config implying a retry policy that no longer exists.
 
-Disarming is deliberate rather than a pause, and re-arming is a **click on the
-lock screen**, not an automatic retry. Two reasons:
+Disarming is deliberate rather than a pause, and re-arming is an **explicit key
+press on the lock screen**, not an automatic retry. Two reasons:
 
 - **It fixes the sleep properly.** A disarmed poller opens no camera and holds
   no timer, so the display blanks and the machine suspends normally. A paused
   poller would still wake the camera on a timer.
 - **Standing at the machine is not consent to be scanned.** Auto-retrying the
   moment a wake is detected means the camera turns on the instant you walk up,
-  including when you have just sat down to type a password. A click makes the
-  camera start an explicit choice.
+  including when you have just sat down to type a password. Pressing a key makes
+  the camera start an explicit choice.
 
-So the flow is: lock, and the scanner scans normally for as long as someone is
-there. Walk away and after three empty probes it disarms and the machine may
-sleep. Come back and the lock screen offers a **"Use face unlock"** button
-(dimmed scanner glyph) — click it, and scanning resumes at the full 900 ms
-interval. Password entry works throughout and is never gated on the click.
+So the flow is: lock, and the scanner runs one probe. If someone is there it
+unlocks. If the room is empty it disarms after that single probe and the machine
+may sleep. Come back and the lock screen shows a **"Press Space to use face
+unlock"** hint — press Space, and scanning resumes at the full 900 ms interval.
+Password entry works throughout and is never gated on the key.
 
 `faceArmed` is the single gate: `startFace()` returns immediately when it is
 false, so no code path can open the camera while disarmed.
@@ -252,6 +255,42 @@ omarchy-patch/reapply.sh --check   # status only
 omarchy-patch/reapply.sh --revert  # back to stock
 ```
 Pristine upstream copies are kept in `omarchy-patch/originals/`.
+
+### How the lock screen behaves
+
+On a deliberate lock (`SUPER+CTRL+L`) or a lid-open, the poller arms
+immediately, so walking up and looking unlocks with no click. That is a
+deliberate owner action, so it is treated as consent to be scanned.
+
+If the room is empty, the poller runs **exactly one** probe and then puts the
+camera away. A hint appears where the scanner was:
+
+```
+Press Space to use face unlock
+```
+
+Space re-arms it. After that the poller stays down until you press Space, so a
+lock opens the IR for one window rather than a loop. An empty probe costs the
+full 5 s daemon timeout, so the hint shows up about 6 s after locking.
+
+Space is intercepted only while the password field is empty, and the hint hides
+as soon as you type anything. That is deliberate: the password field force-takes
+focus and Space is a printable character, so an unguarded handler would corrupt
+any password containing a space. The hint and the guard share one condition, so
+Space only ever does what the on-screen text says.
+
+A button was the original control and was wrong for the job. A click target only
+works if the mouse works, and **the mouse does not work on this lock screen
+after a resume** (see below) — which is exactly when re-arming matters.
+
+> **Known Omarchy issue, not an irface bug:** after waking from suspend the
+> mouse is dead on the lock screen. Verified by reverting to stock Omarchy lock
+> files (`omarchy-patch/reapply.sh --revert`), suspending, waking, and
+> reproducing it with no irface code loaded at all. Suspected cause is Hyprland's
+> `ext-session-lock-v1` surface retaining pointer capture across the suspend, so
+> input goes to a surface that is not receiving it. The keyboard is unaffected,
+> and the password path still works. This is why the re-arm affordance is a key
+> and not a button: face unlock does not depend on the pointer.
 
 > Quickshell does **not** hot-reload these files. After editing, run
 > `omarchy-restart-shell` or the new code stays dormant with no error.
