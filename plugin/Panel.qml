@@ -44,6 +44,11 @@ Panel {
     // copied into the plugins dir by hand. Better to say so than to run
     // "/omarchy-patch/reapply.sh" and fail confusingly.
     readonly property bool pathResolved: projectDir.length > 1 && projectDir[0] === "/"
+    // Set when the post-update hook logged that it could not restore the patch
+    // because upstream changed. That is a different problem from "off" and the
+    // fix is different too, so it gets its own message rather than looking like
+    // the user toggled it off.
+    property bool reapplyBlocked: false
 
     readonly property color hoverFill: bar ? Style.hoverFillFor(bar.foreground, Color.accent) : "transparent"
     readonly property color selectedFill: bar ? Style.selectedFillFor(bar.foreground, Color.accent) : "transparent"
@@ -70,7 +75,10 @@ Panel {
         statusProc.command = ["bash", "-c",
             'systemctl is-active --quiet irface.service && echo -n "1" || echo -n "0"; echo; ' +
             '[[ -f "$HOME/.local/share/irface/faces/' + u + '.npy" ]] && echo -n "1" || echo -n "0"; echo; ' +
-            'grep -q irface /usr/share/omarchy/shell/plugins/lock/Service.qml 2>/dev/null && echo -n "1" || echo -n "0"']
+            'grep -q irface /usr/share/omarchy/shell/plugins/lock/Service.qml 2>/dev/null && echo -n "1" || echo -n "0"; echo; ' +
+            // 4th field: has the post-update hook ever reported that it could
+            // not restore the patch? grep for the marker line it writes.
+            'grep -q "face unlock NOT restored" "$HOME/.cache/irface/update.log" 2>/dev/null && echo -n "1" || echo -n "0"']
         statusProc.running = true
     }
 
@@ -80,13 +88,14 @@ Panel {
     // and the panel sat at all-false forever with no visible error.
     function onExited(output) {
         var parts = ((output || "").match(/[01]/g) || [])
-        if (parts.length < 3) {
+        if (parts.length < 4) {
             root.lastMessage = "could not read status"
             return
         }
         root.daemonActive = parts[0] === "1"
         root.enrolled = parts[1] === "1"
         root.patchApplied = parts[2] === "1"
+        root.reapplyBlocked = parts[3] === "1"
     }
 
     // --- actions ----------------------------------------------------------
@@ -228,7 +237,8 @@ Panel {
         function status(): string {
             return JSON.stringify({
                 daemon: root.daemonActive, enrolled: root.enrolled,
-                patch: root.patchApplied, busy: root.busy
+                patch: root.patchApplied, busy: root.busy,
+                reapplyBlocked: root.reapplyBlocked
             })
         }
         function enable(): string { root.setEnabled(true); return "enabling" }
@@ -322,7 +332,9 @@ Panel {
             Text {
                 text: !root.daemonActive ? "daemon not running"
                     : !root.enrolled ? "no face enrolled"
-                    : root.patchApplied ? "active — lock and look" : "enrolled, lock screen patch is off"
+                    : root.patchApplied ? "active — lock and look"
+                    : root.reapplyBlocked ? "update changed the lock screen — re-apply needs review"
+                    : "enrolled, lock screen patch is off"
                 color: root.bar.foreground
                 opacity: root.daemonActive && root.enrolled && root.patchApplied ? 1 : 0.6
                 font.family: root.bar.fontFamily

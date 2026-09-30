@@ -144,6 +144,17 @@ else
   info "lock screen is already stock"
 fi
 
+# --- 3b. post-update hook ----------------------------------------------------
+step "Removing the post-update hook"
+HOOK="$TARGET_HOME/.config/omarchy/hooks/post-update.d/irface-reapply"
+if [[ -f "$HOOK" ]]; then
+  run rm -f "$HOOK"
+  did "removed the post-update hook"
+else
+  info "hook not installed"
+fi
+run rm -f "${XDG_CACHE_HOME:-$TARGET_HOME/.cache}/irface/root"
+
 # --- 4. bar panel plugin ----------------------------------------------------
 step "Removing the bar panel"
 PLUGIN_DIR="$TARGET_HOME/.config/omarchy/plugins/irface"

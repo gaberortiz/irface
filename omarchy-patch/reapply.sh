@@ -5,6 +5,7 @@
 # which silently removes face unlock. Run this afterwards to restore it.
 #
 #   ./reapply.sh            # install if the current files differ from ours
+#   ./reapply.sh --safe     # like the default, but never clobber changed upstream
 #   ./reapply.sh --force    # install unconditionally
 #   ./reapply.sh --check    # report only, change nothing
 #   ./reapply.sh --revert   # restore the pristine upstream files
@@ -29,6 +30,7 @@ fi
 
 pristine() { md5sum "$1" | cut -d' ' -f1; }
 
+SAFE_SKIPPED=0
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
@@ -60,6 +62,25 @@ for f in Service.qml LockView.qml; do
       sudo install -m644 "$rendered" "$live"
       echo "installed $f"
       ;;
+    --safe)
+      # Used by the post-update hook, where nobody is watching. The live file
+      # must be either already-patched or exactly the pristine copy this patch
+      # was built against. If it is neither, upstream shipped a changed lock
+      # screen and re-installing our old patch on top of it would silently
+      # revert whatever they changed -- possibly breaking the lock screen. In
+      # that case leave it alone and say so; a working stock lock screen with
+      # no face unlock beats a patched one that does not open.
+      if [[ "$(pristine "$rendered")" == "$(pristine "$live")" ]]; then
+        echo "  $f: already patched"
+      elif [[ "$(pristine "$stock")" == "$(pristine "$live")" ]]; then
+        sudo install -m644 "$rendered" "$live"
+        echo "  $f: re-applied after update"
+      else
+        echo "  $f: SKIPPED, upstream changed since this patch was built." >&2
+        echo "    Review with: $0 --check" >&2
+        SAFE_SKIPPED=1
+      fi
+      ;;
     "")
       if [[ "$(pristine "$rendered")" != "$(pristine "$live")" ]]; then
         sudo install -m644 "$rendered" "$live"
@@ -77,6 +98,10 @@ if [[ "$mode" == "--revert" ]]; then
   echo "shell reloading; stock lock restored."
 elif [[ "$mode" == "--check" ]]; then
   :
+elif [[ $SAFE_SKIPPED -eq 1 ]]; then
+  # Nothing was installed, so the running shell is already correct. Restarting
+  # it here would be a pointless reload of a live session.
+  echo "upstream lock screen left untouched; no reload needed."
 else
   omarchy-restart-shell >/dev/null 2>&1 || true
   echo "shell reloading. Test with: SUPER+CTRL+L"

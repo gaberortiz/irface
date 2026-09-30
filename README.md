@@ -282,8 +282,44 @@ A rejected face (exit 1) is different from an empty room — someone is standing
 there — so it keeps scanning after `faceMaxFailures`, just slowly, at
 `faceRejectedRecheckMs` (1.5 s), while still armed.
 
-`omarchy update` overwrites these files, which silently removes face unlock.
-Restore it with:
+### Surviving `omarchy update`
+
+`omarchy update` reinstalls these files, so face unlock silently disappears.
+Omarchy calls `omarchy-hook post-update` after packages and migrations, and
+`install.sh` installs a hook there that re-applies the patch for you:
+
+```
+~/.config/omarchy/hooks/post-update.d/irface-reapply
+```
+
+It runs `reapply.sh --safe`, which is deliberately more careful than the
+default mode:
+
+- live file already patched → no-op
+- live file is exactly the pristine copy the patch was built against → re-apply
+- live file is **neither** → **skip and log**
+
+That third case is the point. After an update upstream may ship a *changed*
+lock screen, and reinstalling a patch written against the old one would silently
+revert whatever they changed, possibly leaving a lock screen that does not
+open. Skipping keeps you on a working stock lock screen and writes the reason
+to `~/.cache/irface/update.log`. The bar panel then reads
+"update changed the lock screen — re-apply needs review" instead of the
+misleading "patch is off".
+
+The hook cannot prompt for a password, so it needs passwordless sudo. If it
+doesn't have it, it logs that and leaves the stock lock screen rather than
+blocking your update. Re-apply manually with:
+
+```bash
+omarchy-patch/reapply.sh --check    # what state am I in
+omarchy-patch/reapply.sh --force    # install regardless of upstream changes
+```
+
+To remove the hook: `rm ~/.config/omarchy/hooks/post-update.d/irface-reapply`
+(`./remove.sh` does this).
+
+Restore it by hand with:
 ```bash
 omarchy-patch/reapply.sh          # install if missing
 omarchy-patch/reapply.sh --check   # status only

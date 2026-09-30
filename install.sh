@@ -112,6 +112,29 @@ else
   info "WARNING: service did not start. Check: journalctl -u irface -n 30"
 fi
 
+# --- post-update hook --------------------------------------------------------
+# `omarchy update` reinstalls the lock screen and silently drops face unlock.
+# Omarchy calls `omarchy-hook post-update` after packages and migrations, which
+# is the supported place to put this. The hook re-applies in --safe mode only.
+step "Installing the post-update hook"
+# omarchy-hook looks for ~/.config/omarchy/hooks/<name> and
+# ~/.config/omarchy/hooks/<name>.d/. So a post-update hook belongs in
+# hooks/post-update.d/, NOT hooks.d/ -- a top-level hooks.d/ is never read.
+HOOK_D="$HOME/.config/omarchy/hooks/post-update.d"
+HOOK_PATH="$HOOK_D/irface-reapply"
+mkdir -p "$HOOK_D"
+# The hook runs unattended, so it must be able to find the checkout without the
+# plugin being loaded. Record the path; the hook reads it back.
+CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/irface"
+mkdir -p "$CACHE_DIR"
+printf '%s\n' "$DIR" > "$CACHE_DIR/root"
+# .d/ is used rather than the plain hook name so an omarchy change to
+# post-update itself cannot collide with ours, and so it is visibly ours.
+cp "$DIR/omarchy-patch/hook-post-update" "$HOOK_PATH"
+chmod +x "$HOOK_PATH"
+info "hook installed ($HOOK_PATH)"
+info "if it ever needs a password, run: sudo $DIR/omarchy-patch/reapply.sh --safe"
+
 # --- bar panel plugin --------------------------------------------------------
 # The settings UI is a real Omarchy plugin rather than a patch, so it survives
 # `omarchy update` and gets the native enable/disable. The panel needs to know

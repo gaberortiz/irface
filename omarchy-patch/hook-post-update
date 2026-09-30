@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# omarchy:summary=Re-apply the irface face-unlock patch after an Omarchy update
+#
+# Installed to ~/.config/omarchy/hooks/post-update by install.sh.
+#
+# `omarchy update` reinstalls /usr/share/omarchy/shell/plugins/lock/*.qml, which
+# silently removes face unlock with no error anywhere. Omarchy calls
+# `omarchy-hook post-update` after packages and migrations, so this runs once,
+# unattended, at the right moment.
+#
+# This only ever runs the patch's --safe mode, which refuses to overwrite a lock
+# screen that upstream has changed since the patch was built. If that happens
+# the hook leaves the stock lock screen alone and writes a note to
+# ~/.cache/irface/update.log pointing at `reapply.sh --check`, because silently
+# reverting an upstream change is how you end up with a lock screen that does
+# not open.
+set -uo pipefail
+
+LOG_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/irface"
+LOG="$LOG_DIR/update.log"
+mkdir -p "$LOG_DIR" 2>/dev/null || true
+
+log() { printf '%s  %s\n' "$(date '+%F %T')" "$*" >>"$LOG" 2>/dev/null || true; }
+
+# Locate the checkout. install.sh writes the path here; the marker is how this
+# finds itself without depending on the plugin being loaded, since the shell may
+# be reloading at this point.
+ROOT_FILE="$LOG_DIR/root"
+if [[ ! -f "$ROOT_FILE" ]]; then
+  log "no root marker at $ROOT_FILE; skipping. Re-run: sudo ~/Work/projects/irface/install.sh"
+  exit 0
+fi
+ROOT="$(cat "$ROOT_FILE" 2>/dev/null || true)"
+REAPPLY="$ROOT/omarchy-patch/reapply.sh"
+if [[ -z "$ROOT" || ! -x "$REAPPLY" ]]; then
+  log "reapply.sh not found at $REAPPLY; skipping."
+  exit 0
+fi
+
+log "--- post-update: checking face unlock patch"
+
+# sudo is a password prompt and this runs unattended during an update. If the
+# owner has passwordless sudo for this exact script, great. Otherwise do not
+# block the update: leave the log and exit cleanly. A stock lock screen is
+# always a working lock screen.
+if ! sudo -n true 2>/dev/null; then
+  log "needs a password to write /usr/share/omarchy; skipping."
+  log "run this after the update: sudo $REAPPLY --safe"
+  exit 0
+fi
+
+out="$(sudo -n "$REAPPLY" --safe 2>&1)"
+rc=$?
+printf '%s\n' "$out" | while IFS= read -r line; do log "  $line"; done
+
+if grep -q "SKIPPED, upstream changed" <<<"$out"; then
+  log "face unlock NOT restored: upstream changed. Review: sudo $REAPPLY --check"
+else
+  log "face unlock patch is in place."
+fi
+
+exit $rc
