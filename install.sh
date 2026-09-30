@@ -13,6 +13,7 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PY=/usr/bin/python3
 UNIT_SRC="$DIR/irface.service"
 UNIT_DST=/etc/systemd/system/irface.service
+PLUGIN_DIR="$HOME/.config/omarchy/plugins/irface"
 DO_PAM=1
 DO_MODELS=1
 MODELS_ONLY=0
@@ -109,6 +110,31 @@ if systemctl is-active --quiet irface.service; then
   info "irface.service active (socket /run/irface/irface.sock)"
 else
   info "WARNING: service did not start. Check: journalctl -u irface -n 30"
+fi
+
+# --- bar panel plugin --------------------------------------------------------
+# The settings UI is a real Omarchy plugin rather than a patch, so it survives
+# `omarchy update` and gets the native enable/disable. The panel needs to know
+# where this checkout lives to reach enroll.sh and reapply.sh, and the shell
+# does not pass the environment through to plugins, so that path is baked into
+# the deployed copy.
+step "Installing the Face ID bar panel"
+if command -v omarchy-plugin-validate >/dev/null; then
+  rm -rf "$PLUGIN_DIR"
+  mkdir -p "$PLUGIN_DIR"
+  cp "$DIR/plugin/manifest.json" "$DIR/plugin/Panel.qml" "$PLUGIN_DIR/"
+  sed -i "s|@IRFACE_DIR@|$DIR|g" "$PLUGIN_DIR/Panel.qml"
+  if omarchy-plugin-validate "$PLUGIN_DIR" >/dev/null 2>&1; then
+    # omarchy plugin add records the plugin in shell.json and hot-reloads it.
+    omarchy plugin enable user.irface >/dev/null 2>&1 \
+      || info "panel copied to $PLUGIN_DIR; enable it with: omarchy plugin enable user.irface"
+    info "panel installed ($PLUGIN_DIR)"
+  else
+    info "WARNING: panel failed validation; not enabled. Run: omarchy plugin validate $PLUGIN_DIR"
+  fi
+else
+  info "omarchy-plugin-validate not found; skipping the bar panel"
+  info "the daemon, sudo auth, and the lock screen patch are unaffected"
 fi
 
 # --- PAM stack ---------------------------------------------------------------

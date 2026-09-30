@@ -28,6 +28,40 @@ change `PY` there if yours lives elsewhere.
 Face enrollment is separate from install and needs no root — see `./enroll.sh`
 below.
 
+### The bar panel (settings UI)
+
+`install.sh` also installs a real Omarchy plugin, `user.irface`, that adds a
+**Face ID** widget to the bar: it shows whether the daemon is up, whether a face
+is enrolled, and whether the lock screen patch is applied, and it carries the
+Enable/Disable toggle, Enroll, and Forget actions.
+
+The lock screen itself stays a patch to the first-party `omarchy.lock` plugin
+and cannot move into a plugin: only one process may hold a Wayland session lock,
+so a second plugin owning the surface would fight it. The panel is the control
+plane for that patch, and because it is a normal plugin it survives
+`omarchy update` and gets the native lifecycle:
+
+```bash
+omarchy plugin list                       # see it
+omarchy plugin disable user.irface        # hide the widget
+omarchy plugin enable  user.irface        # show it again
+omarchy shell user.irface status           # {"daemon":true,...}
+omarchy shell user.irface enable|disable|enroll
+```
+
+Disabling the widget does not disable face unlock — the widget is only the UI.
+Turn the feature itself off with the panel's toggle, or:
+
+```bash
+omarchy-patch/reapply.sh --revert         # lock screen back to stock
+```
+
+The panel needs the absolute path of this checkout to find `enroll.sh` and
+`reapply.sh`, since the shell does not pass the installer environment through to
+plugins. `install.sh` bakes it in. If you copy `plugin/` into
+`~/.config/omarchy/plugins/` by hand, substitute `@IRFACE_DIR@` yourself or the
+panel will say so rather than guess.
+
 ### Uninstalling
 
 ```
@@ -37,7 +71,8 @@ sudo ./remove.sh --keep-models  # keep the ~36MB of ONNX weights
 sudo ./remove.sh --keep-data    # keep enrolled face templates
 ```
 
-It reverses the installer completely: stops the service, restores
+It reverses the installer completely: disables and removes the bar panel, stops
+the service, restores
 `/etc/pam.d/sudo` from the backup taken at install time, restores the Omarchy
 lock screen, removes the unit and the PAM module, and deletes your enrolled
 face templates. Re-running it is safe, and so is running it on a machine that

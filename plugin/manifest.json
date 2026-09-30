@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "user.irface",
+  "name": "Face ID",
+  "version": "1.0.0",
+  "author": "irface",
+  "description": "Face unlock for the Omarchy lock screen: enroll, enable, disable, and see status.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Face ID",
+    "description": "Face unlock for the Omarchy lock screen",
+    "category": "System",
+    "allowMultiple": false
+  }
+}

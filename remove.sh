@@ -32,6 +32,17 @@ done
 
 [[ $EUID -eq 0 ]] || { echo "run as root: sudo $0" >&2; exit 1; }
 
+# sudo resets $HOME to root, but everything user-facing (the bar panel, the
+# face templates) lives in the invoking user's home, not root's. SUDO_USER is
+# the account that ran sudo; fall back to $SUDO_USER's home via getent so a
+# template or panel belonging to them is actually found.
+if [[ -n "$SUDO_USER" ]]; then
+  TARGET_HOME="$(getent passwd "$SUDO_USER" | cut -d: -f6)"
+  [[ -n "$TARGET_HOME" ]] || TARGET_HOME="/home/$SUDO_USER"
+else
+  TARGET_HOME="$HOME"
+fi
+
 # Everything below is a no-op when the thing is already absent, so this is safe
 # to run twice and safe to run on a machine that never had irface.
 run() {
@@ -133,7 +144,22 @@ else
   info "lock screen is already stock"
 fi
 
-# --- 4. unit + PAM module ----------------------------------------------------
+# --- 4. bar panel plugin ----------------------------------------------------
+step "Removing the bar panel"
+PLUGIN_DIR="$TARGET_HOME/.config/omarchy/plugins/irface"
+if [[ -d "$PLUGIN_DIR" ]]; then
+  if command -v omarchy-plugin-disable >/dev/null; then
+    # Disabling first stops the shell holding a live instance of the panel we
+    # are about to delete underneath it.
+    run env HOME="$TARGET_HOME" omarchy plugin disable user.irface
+  fi
+  run rm -rf "$PLUGIN_DIR"
+  done_verb removed remove "the panel ($PLUGIN_DIR)"
+else
+  info "panel not installed"
+fi
+
+# --- 5. unit + PAM module ----------------------------------------------------
 step "Removing the unit and PAM module"
 if [[ -f "$UNIT_BAK" ]]; then
   run cp -a "$UNIT_BAK" "$UNIT"
@@ -146,7 +172,7 @@ fi
 run rm -f /usr/lib/security/pam_irface.so
 run systemctl daemon-reload
 
-# --- 5. enrolled templates ---------------------------------------------------
+# --- 6. enrolled templates ---------------------------------------------------
 # Biometric data, so it is only deleted when the owner asked for a full removal.
 # Left to a non-root invocation for the per-user files.
 step "Enrolled face templates"
@@ -154,20 +180,20 @@ if [[ $KEEP_DATA -eq 1 ]]; then
   info "kept (--keep-data)"
 else
   if [[ $DRY -eq 1 ]]; then
-    for d in /home/*/.local/share/irface/faces /root/.local/share/irface/faces; do
+    for d in "$TARGET_HOME/.local/share/irface/faces"; do
       [[ -d "$d" ]] && done_verb deleted delete "$d"
     done
   else
-    for d in /home/*/.local/share/irface/faces /root/.local/share/irface/faces; do
+    for d in "$TARGET_HOME/.local/share/irface/faces"; do
       [[ -d "$d" ]] || continue
       rm -rf "$d"
       done_verb deleted delete "$d"
     done
-    rmdir -p --ignore-fail-on-non-empty /home/*/.local/share/irface 2>/dev/null || true
+    rmdir -p --ignore-fail-on-non-empty "$TARGET_HOME/.local/share/irface" 2>/dev/null || true
   fi
 fi
 
-# --- 6. models ---------------------------------------------------------------
+# --- 7. models ---------------------------------------------------------------
 step "Model weights"
 if [[ $KEEP_MODELS -eq 1 ]]; then
   info "kept (--keep-models)"
