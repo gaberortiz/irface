@@ -45,11 +45,11 @@ Item {
   property int facePollFailures: 0
   property string faceState: "idle"
   property string faceStatus: ""
-  // Face polling only runs while armed. The poller disarms itself once the room
-  // has been empty long enough (faceMaxNoFace noface probes), so the machine can
-  // blank and suspend normally. Re-arming is a deliberate click on the lock
-  // screen: standing at the machine is not consent to be scanned, and an armed
-  // poller is precisely what kept the display awake.
+  // Face polling only runs while armed. The poller disarms itself after the
+  // first empty probe, so the machine can blank and suspend normally. Re-arming
+  // is a deliberate click on the lock screen: standing at the machine is not
+  // consent to be scanned, and an armed poller is precisely what kept the
+  // display awake.
   property bool faceArmed: false
   readonly property int facePollIntervalMs: 900
   readonly property int faceMaxFailures: 3
@@ -63,15 +63,20 @@ Item {
   // genuine impostor or the owner without their glasses; either way, hammering
   // the IR illuminator gains nothing.
   //
-  // A noface result does not spend the budget, but it must not loop forever
-  // either: an unbounded re-arm keeps the panel lit and the machine out of
-  // suspend, which is worse than a missed unlock. So empty-room probes are
-  // capped at faceMaxNoFace and then stop. Coming back is still enough to
-  // restart, because the secure transition and any wake re-arm the poll.
-  readonly property int faceMaxNoFace: 3
-  // Empty-room cadence. Only ever three of these, so the backoff runs out
-  // quickly instead of holding the display awake indefinitely.
-  readonly property int faceIdleRecheckMs: 4000
+  // A noface result does not spend the budget, but it does end the attempt.
+  // There is no re-arm loop at all: the IR is opened for exactly one empty
+  // probe and then the camera is closed until the owner clicks "Use face
+  // unlock". An unbounded or backoff re-arm kept the panel lit and the machine
+  // out of suspend, which is a worse failure than a missed unlock, and it also
+  // meant the re-arm button was unreachable for tens of seconds. Coming back is
+  // still enough to restart, because the secure transition and any wake re-arm
+  // the poll -- and a click always does.
+  //
+  // There used to be a faceMaxNoFace cap and a faceIdleRecheckMs backoff here.
+  // Both are gone: with a cap of one, the re-arm branch is unreachable, so
+  // keeping them would be dead config implying a retry policy this no longer
+  // has. faceNoFaceCount survives only so the log can say how many empty
+  // probes led here, which is always exactly one.
   // A rejected face does get a few more tries, but at the slow cadence: the
   // person is present, yet it is not going to match.
   readonly property int faceRejectedRecheckMs: 1500
@@ -359,26 +364,20 @@ Item {
     }
 
     // 3 = no face in frame. This is an empty room, not a rejected attempt, so
-    // it must NOT count against the failure budget. It is still capped, though:
-    // an unbounded re-arm would keep the panel lit and the machine awake, which
-    // is a worse failure than a missed unlock. Returning re-arms the poll.
+    // it must NOT count against the failure budget. It does end the attempt,
+    // though: the camera is put away after a single empty probe and stays away
+    // until the owner clicks "Use face unlock". A deliberate lock therefore
+    // opens the IR for one ~5s window rather than a loop, and the re-arm
+    // button becomes reachable in about 6s instead of waiting out a backoff.
     if (exitCode === root.faceExitNoFace) {
       faceNoFaceCount += 1
-      if (faceNoFaceCount >= root.faceMaxNoFace) {
-        logEvent("face-noface x" + faceNoFaceCount + ": disarming, awaiting user")
-        faceState = "idle"
-        faceStatus = ""
-        faceNoFaceCount = 0
-        faceArmed = false
-        facePollTimer.stop()
-        return
-      }
-      logEvent("face-noface " + faceNoFaceCount + "/" + root.faceMaxNoFace
-               + ": re-arm in " + root.faceIdleRecheckMs + "ms")
+      logEvent("face-noface: disarming after " + faceNoFaceCount
+               + " probe(s), awaiting user")
       faceState = "idle"
       faceStatus = ""
-      facePollTimer.interval = root.faceIdleRecheckMs
-      facePollTimer.restart()
+      faceNoFaceCount = 0
+      faceArmed = false
+      facePollTimer.stop()
       return
     }
 
