@@ -142,5 +142,5 @@ Done. Verify with:
     sudo -k && sudo -v          # look at the camera instead of typing
     $DIR/bin/irface verify -u ${SUDO_USER:-$(logname 2>/dev/null || echo <you>)} --watch
 
-Uninstall: sudo systemctl disable --now irface.service
+Uninstall: sudo ./remove.sh   (see --dry-run, --keep-models, --keep-data)
 EOF

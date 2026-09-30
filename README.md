@@ -28,6 +28,26 @@ change `PY` there if yours lives elsewhere.
 Face enrollment is separate from install and needs no root — see `./enroll.sh`
 below.
 
+### Uninstalling
+
+```
+sudo ./remove.sh --dry-run      # print the plan, change nothing
+sudo ./remove.sh                # remove it
+sudo ./remove.sh --keep-models  # keep the ~36MB of ONNX weights
+sudo ./remove.sh --keep-data    # keep enrolled face templates
+```
+
+It reverses the installer completely: stops the service, restores
+`/etc/pam.d/sudo` from the backup taken at install time, restores the Omarchy
+lock screen, removes the unit and the PAM module, and deletes your enrolled
+face templates. Re-running it is safe, and so is running it on a machine that
+never had irface. Your source checkout is deliberately left alone.
+
+Restoring `/etc/pam.d/sudo` is the one step that matters most, so it is worth
+confirming the backup exists before you start: `ls -l /etc/pam.d/sudo.irface.bak`.
+If it is missing the script falls back to removing just the `pam_irface` line
+in place, keeping the `#%PAM-1.0` marker first as PAM requires.
+
 ## Enrolling a face
 
 Anyone with an account on the machine can train irface to accept their face:
