@@ -53,8 +53,15 @@ Panel {
     readonly property color hoverFill: bar ? Style.hoverFillFor(bar.foreground, Color.accent) : "transparent"
     readonly property color selectedFill: bar ? Style.selectedFillFor(bar.foreground, Color.accent) : "transparent"
 
-    // A short glyph in the bar: a face when enrolled, a question mark when not.
-    readonly property string barText: root.enrolled ? "\u25CF" : "\u25CB"
+    // Bar glyph. fa-user_circle (U+F2BD) from the Nerd Font the bar already
+    // uses, chosen by scanning the installed font's 12262-glyph cmap for face
+    // and scan-face names rather than guessing a codepoint: there is no
+    // dedicated "face id" glyph in JetBrainsMono Nerd Font, and an unassigned
+    // codepoint would render as a tofu box with no error anywhere.
+    //
+    // Outlined (fa-user_circle_o, U+F2BE) when no face is enrolled, solid once
+    // one is, so the bar shows state without opening the panel.
+    readonly property string barText: root.enrolled ? "\uf2bd" : "\uf2be"
 
     implicitWidth: button.implicitWidth
     implicitHeight: button.implicitHeight
@@ -321,12 +328,24 @@ Panel {
             anchors.right: parent.right
             spacing: Style.space(8)
 
-            Text {
-                text: "Face ID"
-                color: root.bar.foreground
-                font.family: root.bar.fontFamily
-                font.pixelSize: Style.font.heading
-                font.bold: true
+            Row {
+                spacing: Style.space(6)
+
+                // Same face glyph as the bar, so the panel is recognisably the
+                // same control the icon opened.
+                Text {
+                    text: "\uf2bd"
+                    color: Color.accent
+                    font.family: root.bar.fontFamily
+                    font.pixelSize: Style.font.heading
+                }
+                Text {
+                    text: "Face ID"
+                    color: root.bar.foreground
+                    font.family: root.bar.fontFamily
+                    font.pixelSize: Style.font.heading
+                    font.bold: true
+                }
             }
 
             Text {

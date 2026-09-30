@@ -31,7 +31,8 @@ below.
 ### The bar panel (settings UI)
 
 `install.sh` also installs a real Omarchy plugin, `user.irface`, that adds a
-**Face ID** widget to the bar: it shows whether the daemon is up, whether a face
+**Face ID** widget to the bar (glyph `fa-user_circle`, outlined when no face is
+enrolled and solid once one is): it shows whether the daemon is up, whether a face
 is enrolled, and whether the lock screen patch is applied, and it carries the
 Enable/Disable toggle, Enroll, and Forget actions.
 
